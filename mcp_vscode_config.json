@@ -10,9 +10,8 @@
 			"env": {
 				"FABRIC_SQL_SERVER": "xxxxxxxx.datawarehouse.fabric.microsoft.com",
 				"FABRIC_DATABASE": "xxxxxxxx",
-                "AZURE_TENANT_ID": "f30ac191-xxxx-45f2-xxxx-e5466cb90c2f",
-				"AZURE_CLIENT_ID": "3224cbfb-xxxx-413b-xxxx-4b9ac0a3522b",
-				"AZURE_CLIENT_SECRET": "yiA8Q~xxxxxxxx.gDlylwYv2MGcP9"
+				"AZURE_TENANT_ID": "00000000-0000-0000-0000-000000000000",
+				"AZURE_CLIENT_ID": "00000000-0000-0000-0000-000000000000"
 			}
 		}
 	}
