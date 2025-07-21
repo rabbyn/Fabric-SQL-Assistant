@@ -13,6 +13,11 @@ __pycache__/
 env/
 venv/
 
+# Testing and validation
+test_schema_discovery.py
+validate_improvements.py
+validate_code_changes.py
+
 # IDE
 .vscode/
 .github/

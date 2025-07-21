@@ -204,26 +204,24 @@ def test_connection():
 def get_table_schema():
     """Get schema information for all tables to help with query generation."""
     try:
+        # Try Fabric-compatible schema query first
         schema_query = """
         SELECT 
+            t.TABLE_SCHEMA,
             t.TABLE_NAME,
             c.COLUMN_NAME,
             c.DATA_TYPE,
             c.IS_NULLABLE,
-            CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN 'YES' ELSE 'NO' END as IS_PRIMARY_KEY
+            c.ORDINAL_POSITION,
+            c.CHARACTER_MAXIMUM_LENGTH,
+            c.NUMERIC_PRECISION,
+            c.NUMERIC_SCALE,
+            c.COLUMN_DEFAULT
         FROM INFORMATION_SCHEMA.TABLES t
-        JOIN INFORMATION_SCHEMA.COLUMNS c ON t.TABLE_NAME = c.TABLE_NAME
-        LEFT JOIN (
-            SELECT 
-                ku.TABLE_NAME,
-                ku.COLUMN_NAME
-            FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
-            JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku ON tc.CONSTRAINT_NAME = ku.CONSTRAINT_NAME
-            WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
-        ) pk ON c.TABLE_NAME = pk.TABLE_NAME AND c.COLUMN_NAME = pk.COLUMN_NAME
+        JOIN INFORMATION_SCHEMA.COLUMNS c ON t.TABLE_NAME = c.TABLE_NAME AND t.TABLE_SCHEMA = c.TABLE_SCHEMA
         WHERE t.TABLE_TYPE = 'BASE TABLE'
-        AND t.TABLE_SCHEMA = 'dbo'
-        ORDER BY t.TABLE_NAME, c.ORDINAL_POSITION
+        AND t.TABLE_SCHEMA NOT IN ('sys', 'INFORMATION_SCHEMA')
+        ORDER BY t.TABLE_SCHEMA, t.TABLE_NAME, c.ORDINAL_POSITION
         """
         
         columns, rows = run_query(schema_query)
@@ -231,21 +229,116 @@ def get_table_schema():
         # Organize schema by table
         schema = {}
         for row in rows:
-            table_name = row[0]
-            if table_name not in schema:
-                schema[table_name] = []
-            schema[table_name].append({
-                'column_name': row[1],
-                'data_type': row[2],
-                'is_nullable': row[3],
-                'is_primary_key': row[4]
-            })
+            schema_name = row[0]
+            table_name = row[1]
+            full_table_name = f"{schema_name}.{table_name}"
+            
+            if full_table_name not in schema:
+                schema[full_table_name] = []
+            
+            column_info = {
+                'column_name': row[2],
+                'data_type': row[3],
+                'is_nullable': row[4],
+                'ordinal_position': row[5],
+                'max_length': row[6],
+                'numeric_precision': row[7],
+                'numeric_scale': row[8],
+                'column_default': row[9]
+            }
+            
+            schema[full_table_name].append(column_info)
+        
+        # Try to get primary key information separately (Fabric Data Warehouse compatible)
+        try:
+            pk_query = """
+            SELECT 
+                tc.TABLE_SCHEMA,
+                tc.TABLE_NAME,
+                ku.COLUMN_NAME
+            FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+            JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku ON tc.CONSTRAINT_NAME = ku.CONSTRAINT_NAME
+                AND tc.TABLE_SCHEMA = ku.TABLE_SCHEMA 
+                AND tc.TABLE_NAME = ku.TABLE_NAME
+            WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+            """
+            
+            pk_columns, pk_rows = run_query(pk_query)
+            
+            # Mark primary key columns
+            pk_info = {}
+            for pk_row in pk_rows:
+                pk_schema = pk_row[0]
+                pk_table = pk_row[1]
+                pk_column = pk_row[2]
+                pk_full_name = f"{pk_schema}.{pk_table}"
+                
+                if pk_full_name not in pk_info:
+                    pk_info[pk_full_name] = set()
+                pk_info[pk_full_name].add(pk_column)
+            
+            # Update schema with primary key information
+            for table_name, columns in schema.items():
+                table_pks = pk_info.get(table_name, set())
+                for col in columns:
+                    col['is_primary_key'] = col['column_name'] in table_pks
+                    
+        except Exception as pk_e:
+            print(f"Could not retrieve primary key information: {pk_e}")
+            # Set all primary key flags to False if we can't get the info
+            for table_name, columns in schema.items():
+                for col in columns:
+                    col['is_primary_key'] = False
         
         return schema
         
     except Exception as e:
-        print(f"Could not retrieve schema: {e}")
-        return None
+        print(f"Could not retrieve schema using Fabric query: {e}")
+        
+        # Fallback to basic schema query without constraints
+        try:
+            basic_query = """
+            SELECT 
+                TABLE_SCHEMA,
+                TABLE_NAME,
+                COLUMN_NAME,
+                DATA_TYPE,
+                IS_NULLABLE
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA NOT IN ('sys', 'INFORMATION_SCHEMA')
+            ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
+            """
+            
+            columns, rows = run_query(basic_query)
+            
+            # Organize basic schema
+            schema = {}
+            for row in rows:
+                schema_name = row[0]
+                table_name = row[1]
+                full_table_name = f"{schema_name}.{table_name}"
+                
+                if full_table_name not in schema:
+                    schema[full_table_name] = []
+                
+                schema[full_table_name].append({
+                    'column_name': row[2],
+                    'data_type': row[3],
+                    'is_nullable': row[4],
+                    'is_primary_key': False,  # Can't determine without constraints
+                    'ordinal_position': None,
+                    'max_length': None,
+                    'numeric_precision': None,
+                    'numeric_scale': None,
+                    'column_default': None
+                })
+            
+            print("Using basic schema discovery (no constraint information available)")
+            return schema
+            
+        except Exception as basic_e:
+            print(f"Basic schema query also failed: {basic_e}")
+            return None
 
 # Utility function to check environment
 def check_environment():

@@ -10,9 +10,9 @@ CLIENT_SECRET = os.getenv("AZURE_CLIENT_SECRET")
 TENANT = os.getenv("AZURE_TENANT_ID")
 
 # Correct scope for Fabric SQL - try both to see which works
-#SCOPE = ["https://database.windows.net/.default"]  # Primary scope for SQL
+SCOPE = ["https://database.windows.net/.default"]  # Primary scope for SQL
 # Alternative scope if the above doesn't work:
-SCOPE = ["https://analysis.windows.net/powerbi/api/.default"]
+#SCOPE = ["https://analysis.windows.net/powerbi/api/.default"]
 
 
 # Choose MSAL app type based on presence of client secret
