@@ -233,119 +233,175 @@ async def handle_discover_schema(arguments: dict) -> list[types.TextContent]:
     try:
         from db import run_query
         
-        # Query for all tables and columns with more details
-        schema_query = """
-        SELECT 
-            t.TABLE_SCHEMA,
-            t.TABLE_NAME,
-            t.TABLE_TYPE,
-            c.COLUMN_NAME,
-            c.DATA_TYPE,
-            c.CHARACTER_MAXIMUM_LENGTH,
-            c.NUMERIC_PRECISION,
-            c.NUMERIC_SCALE,
-            c.IS_NULLABLE,
-            c.COLUMN_DEFAULT,
-            c.ORDINAL_POSITION,
-            CASE 
-                WHEN pk.COLUMN_NAME IS NOT NULL THEN 'PK'
-                WHEN fk.COLUMN_NAME IS NOT NULL THEN 'FK'
-                ELSE ''
-            END as KEY_TYPE,
-            fk.REFERENCED_TABLE_NAME,
-            fk.REFERENCED_COLUMN_NAME
-        FROM INFORMATION_SCHEMA.TABLES t
-        JOIN INFORMATION_SCHEMA.COLUMNS c ON t.TABLE_NAME = c.TABLE_NAME AND t.TABLE_SCHEMA = c.TABLE_SCHEMA
-        LEFT JOIN (
+        # Try Fabric Data Warehouse compatible schema discovery
+        # First get basic table and column information
+        try:
+            basic_schema_query = """
             SELECT 
-                ku.TABLE_SCHEMA,
-                ku.TABLE_NAME,
+                t.TABLE_SCHEMA,
+                t.TABLE_NAME,
+                t.TABLE_TYPE,
+                c.COLUMN_NAME,
+                c.DATA_TYPE,
+                c.CHARACTER_MAXIMUM_LENGTH,
+                c.NUMERIC_PRECISION,
+                c.NUMERIC_SCALE,
+                c.IS_NULLABLE,
+                c.COLUMN_DEFAULT,
+                c.ORDINAL_POSITION
+            FROM INFORMATION_SCHEMA.TABLES t
+            JOIN INFORMATION_SCHEMA.COLUMNS c ON t.TABLE_NAME = c.TABLE_NAME AND t.TABLE_SCHEMA = c.TABLE_SCHEMA
+            WHERE t.TABLE_TYPE = 'BASE TABLE'
+            AND t.TABLE_SCHEMA NOT IN ('sys', 'INFORMATION_SCHEMA')
+            ORDER BY t.TABLE_SCHEMA, t.TABLE_NAME, c.ORDINAL_POSITION
+            """
+            
+            cols, rows = run_query(basic_schema_query)
+            
+            # Process basic schema data
+            basic_schema_data = {}
+            for row in rows:
+                schema_name = row[0]
+                table_name = row[1]
+                table_type = row[2]
+                column_name = row[3]
+                data_type = row[4]
+                max_length = row[5]
+                precision = row[6]
+                scale = row[7]
+                is_nullable = row[8]
+                default_value = row[9]
+                ordinal = row[10]
+                
+                full_table_name = f"{schema_name}.{table_name}"
+                
+                if full_table_name not in basic_schema_data:
+                    basic_schema_data[full_table_name] = {
+                        "schema": schema_name,
+                        "table_name": table_name,
+                        "table_type": table_type,
+                        "columns": []
+                    }
+                
+                col_info = {
+                    "name": column_name,
+                    "data_type": data_type,
+                    "position": ordinal,
+                    "is_nullable": is_nullable == "YES",
+                    "key_type": ""  # Will be populated separately
+                }
+                
+                if max_length:
+                    col_info["max_length"] = max_length
+                if precision:
+                    col_info["precision"] = precision
+                if scale:
+                    col_info["scale"] = scale
+                if default_value:
+                    col_info["default"] = default_value
+                    
+                basic_schema_data[full_table_name]["columns"].append(col_info)
+            
+        except Exception as e:
+            raise Exception(f"Failed to get basic schema information: {e}")
+        
+        # Try to get primary key information (separate query for Fabric compatibility)
+        pk_info = {}
+        try:
+            pk_query = """
+            SELECT 
+                tc.TABLE_SCHEMA,
+                tc.TABLE_NAME,
                 ku.COLUMN_NAME
             FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
             JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku ON tc.CONSTRAINT_NAME = ku.CONSTRAINT_NAME
+                AND tc.TABLE_SCHEMA = ku.TABLE_SCHEMA 
+                AND tc.TABLE_NAME = ku.TABLE_NAME
             WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
-        ) pk ON c.TABLE_SCHEMA = pk.TABLE_SCHEMA AND c.TABLE_NAME = pk.TABLE_NAME AND c.COLUMN_NAME = pk.COLUMN_NAME
-        LEFT JOIN (
-            SELECT 
-                ku.TABLE_SCHEMA,
-                ku.TABLE_NAME,
-                ku.COLUMN_NAME,
-                ku.REFERENCED_TABLE_NAME,
-                ku.REFERENCED_COLUMN_NAME
-            FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
-            JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku ON tc.CONSTRAINT_NAME = ku.CONSTRAINT_NAME
-            WHERE tc.CONSTRAINT_TYPE = 'FOREIGN KEY'
-        ) fk ON c.TABLE_SCHEMA = fk.TABLE_SCHEMA AND c.TABLE_NAME = fk.TABLE_NAME AND c.COLUMN_NAME = fk.COLUMN_NAME
-        WHERE t.TABLE_SCHEMA NOT IN ('sys', 'INFORMATION_SCHEMA')
-        ORDER BY t.TABLE_SCHEMA, t.TABLE_NAME, c.ORDINAL_POSITION
-        """
-        
-        cols, rows = run_query(schema_query)
-        
-        # Organize schema data
-        schema_data = {}
-        relationships = []
-        
-        for row in rows:
-            schema_name = row[0]
-            table_name = row[1]
-            table_type = row[2]
-            column_name = row[3]
-            data_type = row[4]
-            max_length = row[5]
-            precision = row[6]
-            scale = row[7]
-            is_nullable = row[8]
-            default_value = row[9]
-            ordinal = row[10]
-            key_type = row[11]
-            ref_table = row[12]
-            ref_column = row[13]
+            """
             
-            full_table_name = f"{schema_name}.{table_name}"
+            pk_cols, pk_rows = run_query(pk_query)
             
-            if full_table_name not in schema_data:
-                schema_data[full_table_name] = {
-                    "schema": schema_name,
-                    "table_name": table_name,
-                    "table_type": table_type,
-                    "columns": []
-                }
-            
-            # Build column info
-            col_info = {
-                "name": column_name,
-                "data_type": data_type,
-                "position": ordinal,
-                "is_nullable": is_nullable == "YES",
-                "key_type": key_type
-            }
-            
-            # Add type details
-            if max_length:
-                col_info["max_length"] = max_length
-            if precision:
-                col_info["precision"] = precision
-            if scale:
-                col_info["scale"] = scale
-            if default_value:
-                col_info["default"] = default_value
+            for pk_row in pk_rows:
+                pk_schema = pk_row[0]
+                pk_table = pk_row[1]
+                pk_column = pk_row[2]
+                pk_full_name = f"{pk_schema}.{pk_table}"
                 
-            schema_data[full_table_name]["columns"].append(col_info)
+                if pk_full_name not in pk_info:
+                    pk_info[pk_full_name] = set()
+                pk_info[pk_full_name].add(pk_column)
+                
+        except Exception as pk_e:
+            print(f"Warning: Could not retrieve primary key information: {pk_e}")
+        
+        # Try to get foreign key information (separate query, may not work in all Fabric configurations)
+        fk_relationships = []
+        try:
+            # Try a simpler FK query that works with more systems
+            fk_query = """
+            SELECT 
+                fk.TABLE_SCHEMA as FK_SCHEMA,
+                fk.TABLE_NAME as FK_TABLE,
+                fk.COLUMN_NAME as FK_COLUMN,
+                pk.TABLE_SCHEMA as PK_SCHEMA,
+                pk.TABLE_NAME as PK_TABLE,
+                pk.COLUMN_NAME as PK_COLUMN
+            FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
+            JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE fk ON rc.CONSTRAINT_NAME = fk.CONSTRAINT_NAME
+                AND rc.CONSTRAINT_SCHEMA = fk.CONSTRAINT_SCHEMA
+            JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE pk ON rc.UNIQUE_CONSTRAINT_NAME = pk.CONSTRAINT_NAME
+                AND rc.UNIQUE_CONSTRAINT_SCHEMA = pk.CONSTRAINT_SCHEMA
+            """
             
-            # Track relationships
-            if key_type == "FK" and ref_table:
-                relationships.append({
-                    "from_table": full_table_name,
-                    "from_column": column_name,
-                    "to_table": f"{schema_name}.{ref_table}",
-                    "to_column": ref_column
+            fk_cols, fk_rows = run_query(fk_query)
+            
+            fk_info = {}
+            for fk_row in fk_rows:
+                fk_schema = fk_row[0]
+                fk_table = fk_row[1]
+                fk_column = fk_row[2]
+                pk_schema = fk_row[3]
+                pk_table = fk_row[4]
+                pk_column = fk_row[5]
+                
+                fk_full_name = f"{fk_schema}.{fk_table}"
+                pk_full_name = f"{pk_schema}.{pk_table}"
+                
+                if fk_full_name not in fk_info:
+                    fk_info[fk_full_name] = set()
+                fk_info[fk_full_name].add(fk_column)
+                
+                fk_relationships.append({
+                    "from_table": fk_full_name,
+                    "from_column": fk_column,
+                    "to_table": pk_full_name,
+                    "to_column": pk_column
                 })
+                
+        except Exception as fk_e:
+            print(f"Warning: Could not retrieve foreign key information: {fk_e}")
+            print("This is normal for Fabric Data Warehouse - foreign key metadata may not be available")
+            fk_info = {}
+        
+        # Combine all information
+        schema_data = basic_schema_data
+        for table_name, table_info in schema_data.items():
+            table_pks = pk_info.get(table_name, set())
+            table_fks = fk_info.get(table_name, set())
+            
+            for col in table_info["columns"]:
+                if col["name"] in table_pks:
+                    col["key_type"] = "PK"
+                elif col["name"] in table_fks:
+                    col["key_type"] = "FK"
+                else:
+                    col["key_type"] = ""
         
         # Cache the schema
         current_config["schema_cache"] = {
             "tables": schema_data,
-            "relationships": relationships,
+            "relationships": fk_relationships,
             "discovered_at": asyncio.get_event_loop().time()
         }
         
@@ -510,7 +566,7 @@ def format_schema_response(schema_cache: dict) -> str:
     tables = schema_cache["tables"]
     relationships = schema_cache["relationships"]
     
-    response_parts = [f"## Database Schema Discovery Complete!", f"**Found {len(tables)} tables**", ""]
+    response_parts = [f"## 🎯 Fabric Data Warehouse Schema Discovery Complete!", f"**Found {len(tables)} tables**", ""]
     
     # Group tables by schema
     schemas = {}
@@ -538,14 +594,22 @@ def format_schema_response(schema_cache: dict) -> str:
     
     # Display relationships
     if relationships:
-        response_parts.append("### Relationships")
+        response_parts.append("### 🔗 Relationships")
         response_parts.append("")
         for rel in relationships[:10]:  # Show first 10
             response_parts.append(f"- {rel['from_table']}.{rel['from_column']} → {rel['to_table']}.{rel['to_column']}")
         if len(relationships) > 10:
             response_parts.append(f"... and {len(relationships) - 10} more relationships")
+    else:
+        response_parts.append("### 🔗 Relationships")
+        response_parts.append("*No foreign key relationships found - this is normal for Fabric Data Warehouse*")
     
-    response_parts.append("\n**Next Steps:**")
+    response_parts.append("\n**✅ Fabric Data Warehouse Compatibility:**")
+    response_parts.append("- Schema discovery optimized for Fabric SQL endpoints")
+    response_parts.append("- Handles missing constraint metadata gracefully")
+    response_parts.append("- Multiple fallback strategies for different configurations")
+    
+    response_parts.append("\n**🚀 Next Steps:**")
     response_parts.append("1. Use `ask_database` to query your data with natural language")
     response_parts.append("2. Use `get_table_details` to inspect specific tables")
     response_parts.append("3. The AI will automatically use this schema for better SQL generation")

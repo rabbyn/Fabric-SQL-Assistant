@@ -13,6 +13,9 @@ __pycache__/
 env/
 venv/
 
+# Testing
+test_schema_discovery.py
+
 # IDE
 .vscode/
 .github/
