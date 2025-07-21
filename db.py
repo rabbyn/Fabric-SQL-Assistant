@@ -2,7 +2,7 @@ import os
 import struct
 import pyodbc
 import time
-from auth import get_token_interactive
+from auth import get_token
 
 def _find_driver():
     """Pick the latest installed ODBC Driver for SQL Server."""
@@ -45,7 +45,7 @@ def get_connection():
     print(f"Database: {DATABASE}")
     
     # Get fresh token
-    token = get_token_interactive()
+    token = get_token()
     
     # Fabric SQL requires specific token encoding (different from regular Azure SQL)
     from itertools import chain, repeat

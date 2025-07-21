@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "fabric-sql-assistant": {
+      "command": "C:/Users/xxxx/xxxx/xxxx/mcp-fabric-assistant/.venv/Scripts/python.exe",
+      "args": [
+        "C:/Users/xxxx/xxxx/xxxx/mcp-fabric-assistant/mcp_server.py"
+      ],
+      "env": {
+        "FABRIC_SQL_SERVER": "xxxx",
+        "FABRIC_DATABASE": "xxxx",
+        "AZURE_CLIENT_ID": "xxxx",
+        "AZURE_TENANT_ID": "xxxx",
+        "OPENAI_API_KEY": "xxxx"
+      }
+    }
+  }
+}
