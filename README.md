@@ -1,7 +1,13 @@
 # Fabric SQL MCP Server Setup Guide for Claude Desktop
 
 ## 🎯 Overview
-This guide will help you set up a Model Context Protocol (MCP) server that allows Claude Desktop to interact with Microsoft Fabric SQL databases using natural language.
+This guide will help you set up a Model Context Protocol (MCP) server that allows Claude Desktop to interact with Microsoft Fabric Data Warehouse and SQL databases using natural language.
+
+**✨ New in this version:**
+- **Fabric Data Warehouse Support**: Optimized schema discovery for Fabric SQL endpoints
+- **Enhanced Compatibility**: Works with various Fabric configurations and constraint limitations
+- **Robust Fallbacks**: Graceful handling when advanced metadata isn't available
+- **Improved Error Handling**: Better diagnostics for connection and schema issues
 
 ## 📋 Prerequisites
 
